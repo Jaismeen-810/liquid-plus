@@ -1,0 +1,28 @@
+# Secrets and local config (templates .env.example and seed_users.example.json ARE committed)
+.env
+.env.*
+!.env.example
+backend/seed_users.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Runtime output
+backend/logs/
+backend/uploads/
+*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editors and OS
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db

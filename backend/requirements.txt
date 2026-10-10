@@ -1,0 +1,29 @@
+# Web API
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+pydantic==2.14.0
+pydantic-settings==2.15.0
+
+# Database (PostgreSQL via psycopg 3)
+SQLAlchemy==2.1.4
+psycopg[binary]==3.3.6
+
+# Auth
+PyJWT==2.15.1
+bcrypt==5.0.0
+
+# Data + behavioral model (scikit-learn must match the version the models in ml_models/ were saved with)
+pandas==3.0.6
+numpy==2.5.3
+openpyxl==3.1.5
+python-dateutil==2.9.0.post0
+scikit-learn==1.9.1
+joblib==1.6.0
+
+# Reports
+reportlab==5.0.1
+
+# Tests
+pytest==9.1.1
+httpx==0.28.1

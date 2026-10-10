@@ -1,0 +1,8 @@
+[
+  {"username": "hk_user",      "full_name": "Hong Kong Treasury", "role": "BRANCH",  "location": "Hong Kong", "password": "<at least 8 characters>"},
+  {"username": "ny_user",      "full_name": "New York Treasury",  "role": "BRANCH",  "location": "New York",  "password": "<at least 8 characters>"},
+  {"username": "ldn_user",     "full_name": "London Treasury",    "role": "BRANCH",  "location": "London",    "password": "<at least 8 characters>"},
+  {"username": "sg_user",      "full_name": "Singapore Treasury", "role": "BRANCH",  "location": "Singapore", "password": "<at least 8 characters>"},
+  {"username": "paris_user",   "full_name": "Paris Treasury",     "role": "BRANCH",  "location": "Paris",     "password": "<at least 8 characters>"},
+  {"username": "support_user", "full_name": "Global Support",     "role": "SUPPORT", "password": "<at least 8 characters>"}
+]
