@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from dateutil.relativedelta import relativedelta
+
 import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,19 +14,28 @@ from app.services.ladder import Scope
 GROUPS = {"product_type": HistoricalLog.product_type, "customer_segment": HistoricalLog.customer_segment, "type": HistoricalLog.type}
 
 
-def _history(db: Session, scope: Scope, extra=()) -> pd.DataFrame:
+def _history(db: Session, scope: Scope, as_of: date, extra=()) -> pd.DataFrame:
+    """Closed historical contracts in scope, as known on the run date (closures after it are excluded)."""
     stmt = select(
         HistoricalLog.type, HistoricalLog.amount, HistoricalLog.currency, HistoricalLog.location,
         HistoricalLog.contractual_maturity_date, HistoricalLog.actual_closure_date, *extra,
-    ).where(HistoricalLog.location.in_(scope.locations), HistoricalLog.actual_closure_date.is_not(None))
+    ).where(
+        HistoricalLog.location.in_(scope.locations),
+        HistoricalLog.actual_closure_date.is_not(None),
+        HistoricalLog.actual_closure_date <= as_of,
+    )
     if scope.currency:
         stmt = stmt.where(HistoricalLog.currency == scope.currency)
     return pd.DataFrame(db.execute(stmt).mappings().all())
 
 
-def exit_trends(db: Session, scope: Scope, group_by: str) -> ExitTrendResponse:
+def exit_trends(db: Session, scope: Scope, group_by: str, as_of: date, months: int | None = None) -> ExitTrendResponse:
+    """Monthly early-exit rate for closures up to the run date; `months` limits it to the last N months."""
     col = GROUPS[group_by]
-    df = _history(db, scope, (col.label("grp"),) if group_by != "type" else ())
+    df = _history(db, scope, as_of, (col.label("grp"),) if group_by != "type" else ())
+    if months and not df.empty:
+        start = (as_of - relativedelta(months=months - 1)).replace(day=1)
+        df = df[pd.to_datetime(df["actual_closure_date"]) >= pd.Timestamp(start)]
     if df.empty:
         return ExitTrendResponse(group_by=group_by, points=[])
     if group_by == "type":
@@ -41,10 +52,10 @@ def exit_trends(db: Session, scope: Scope, group_by: str) -> ExitTrendResponse:
     return ExitTrendResponse(group_by=group_by, points=points)
 
 
-def outflow_anomalies(db: Session, scope: Scope, days: int = 365) -> AnomalyResponse:
+def outflow_anomalies(db: Session, scope: Scope, as_of: date, days: int = 365) -> AnomalyResponse:
     settings = get_settings()
     window, multiplier = settings.anomaly_window_days, settings.anomaly_multiplier
-    df = _history(db, scope)
+    df = _history(db, scope, as_of)
     empty = AnomalyResponse(window_days=window, multiplier=multiplier, currency=scope.currency,
                             location=scope.location, points=[], anomaly_count=0)
     if df.empty:
@@ -55,7 +66,8 @@ def outflow_anomalies(db: Session, scope: Scope, days: int = 365) -> AnomalyResp
 
     df["closure"] = pd.to_datetime(df["actual_closure_date"])
     daily = df.groupby("closure")["amount"].sum().astype(float)
-    daily = daily.reindex(pd.date_range(daily.index.min(), daily.index.max(), freq="D"), fill_value=0.0)
+    # timeline ends on the run date, so quiet days right before it still count towards the average
+    daily = daily.reindex(pd.date_range(daily.index.min(), pd.Timestamp(as_of), freq="D"), fill_value=0.0)
     rolling = daily.shift(1).rolling(window, min_periods=min(30, window)).mean()
     ratio = daily / rolling
 

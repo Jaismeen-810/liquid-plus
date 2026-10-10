@@ -116,3 +116,19 @@ def test_retrain_model(client, support_headers, loaded):
     r = client.post("/api/ml/train", headers=support_headers)
     assert r.status_code == 200, r.text
     assert all(m["available"] and m["metrics"]["roc_auc"] > 0 for m in r.json())
+
+
+def test_analytics_follow_run_date(client, support_headers, loaded):
+    as_of = "2025-06-30"
+    trends = client.get("/api/analytics/exit-trends", params={"run_date": as_of}, headers=support_headers).json()
+    assert trends["points"] and max(p["period"] for p in trends["points"]) <= "2025-06"
+    later = client.get("/api/analytics/exit-trends", params={"run_date": str(loaded)}, headers=support_headers).json()
+    assert max(p["period"] for p in later["points"]) > "2025-06"
+    anomalies = client.get("/api/analytics/anomalies", params={"run_date": as_of, "days": 90}, headers=support_headers).json()
+    assert anomalies["points"][-1]["date"] == as_of
+
+
+def test_exit_trend_period(client, support_headers, loaded):
+    params = {"run_date": str(loaded), "months": 6}
+    periods = {p["period"] for p in client.get("/api/analytics/exit-trends", params=params, headers=support_headers).json()["points"]}
+    assert periods and min(periods) >= "2026-05"

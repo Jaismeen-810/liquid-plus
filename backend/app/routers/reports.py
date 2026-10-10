@@ -41,15 +41,22 @@ def recommendations(
 @router.get("/analytics/exit-trends", response_model=ExitTrendResponse, tags=["analytics"])
 def exit_trends(
     group_by: Literal["product_type", "customer_segment", "type"] = "customer_segment",
+    months: int | None = Query(None, ge=1, le=240, description="Only the last N months up to the run date"),
+    run_date: date = Depends(resolve_run_date),
     scope: Scope = Depends(get_scope),
     db: Session = Depends(get_db),
 ):
-    return analytics.exit_trends(db, scope, group_by)
+    return analytics.exit_trends(db, scope, group_by, run_date, months)
 
 
 @router.get("/analytics/anomalies", response_model=AnomalyResponse, tags=["analytics"])
-def anomalies(days: int = Query(365, ge=7, le=3650), scope: Scope = Depends(get_scope), db: Session = Depends(get_db)):
-    return analytics.outflow_anomalies(db, scope, days)
+def anomalies(
+    days: int = Query(365, ge=7, le=3650),
+    run_date: date = Depends(resolve_run_date),
+    scope: Scope = Depends(get_scope),
+    db: Session = Depends(get_db),
+):
+    return analytics.outflow_anomalies(db, scope, run_date, days)
 
 
 def _file(content: bytes, name: str, fmt: str) -> Response:

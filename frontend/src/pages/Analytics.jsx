@@ -12,8 +12,9 @@ export default function Analytics() {
   const { params, currency, location } = useFilters()
   const [groupBy, setGroupBy] = useState('customer_segment')
   const [days, setDays] = useState(365)
-  const scope = { location: params.location, currency }
-  const trends = useFetch('/api/analytics/exit-trends', { ...scope, group_by: groupBy })
+  const [months, setMonths] = useState(12)
+  const scope = { run_date: params.run_date, location: params.location, currency }
+  const trends = useFetch('/api/analytics/exit-trends', { ...scope, group_by: groupBy, months: months || undefined })
   const anomalies = useFetch('/api/analytics/anomalies', { ...scope, days })
 
   const { rows, groups } = useMemo(() => {
@@ -31,14 +32,20 @@ export default function Analytics() {
 
   return (
     <>
-      <PageHead title="Behavioral analytics" note={`Historical behavior for ${currency}, ${location || 'all locations'}.`} />
+      <PageHead title="Behavioral analytics" note={`Historical behavior for ${currency}, ${location || 'all locations'}, using contracts closed on or before ${params.run_date}.`} />
 
       <section>
         <div className="sectionhead">
           <h2>Early exit rate by month of closure</h2>
-          <select value={groupBy} onChange={e => setGroupBy(e.target.value)} aria-label="Group by">
-            {Object.entries(GROUPS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
+          <div className="inline">
+            <select value={groupBy} onChange={e => setGroupBy(e.target.value)} aria-label="Group by">
+              {Object.entries(GROUPS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <select value={months} onChange={e => setMonths(Number(e.target.value))} aria-label="Trend period">
+              <option value={6}>Last 6 months</option><option value={12}>Last 12 months</option>
+              <option value={24}>Last 24 months</option><option value={0}>All history</option>
+            </select>
+          </div>
         </div>
         <Status loading={trends.loading} error={trends.error} />
         {rows.length > 0 && (

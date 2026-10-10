@@ -86,56 +86,162 @@ tuned thresholds (asset 0.43, liability 0.62).
   historical log (same search and threshold tuning as the ML project), overwrites `ml_models/`, and re-scores
   every run date.
 
-## Setup
+## Setup (run it locally)
 
-Prerequisites: Python 3.12, Node 20+, PostgreSQL 15+ (local), or a Supabase project.
+The commands below are for **Windows PowerShell**. On macOS/Linux, use `/` instead of `\` and
+`.venv/bin/python` instead of `.venv\Scripts\python`.
 
-### 1. Database
+### 0. Prerequisites (install once)
 
-**Local (recommended for development).** Create an empty database:
+| Tool | Version | Download | Check with |
+|------|---------|----------|------------|
+| Git | any recent | https://git-scm.com/download/win | `git --version` |
+| Python | 3.12 (3.11 minimum) | https://www.python.org/downloads/ (tick **"Add python.exe to PATH"**) | `python --version` |
+| Node.js | 20 or newer (LTS) | https://nodejs.org/ | `node --version` |
+| PostgreSQL + pgAdmin 4 | 15 or newer | see below | pgAdmin opens and connects |
 
-```bash
-createdb -U postgres liquidplus
+If a version check fails right after installing, close and reopen PowerShell.
+
+#### Installing PostgreSQL and pgAdmin (one installer)
+
+Skip this if PostgreSQL and pgAdmin are already installed. Check the Start menu for "pgAdmin 4".
+
+1. Go to https://www.postgresql.org/download/windows/ → **Download the installer** (EDB). Choose the latest
+   version (17.x) for **Windows x86-64**.
+2. Run the installer and keep the defaults on each screen:
+   - **Components:** leave all ticked: *PostgreSQL Server*, *pgAdmin 4*, *Command Line Tools*.
+     *Stack Builder* is not needed.
+   - **Data directory:** default.
+   - **Password:** choose a password for the `postgres` user and **write it down**. You need it in step 3.
+     It's simplest to avoid `#`, `@`, `:`, `/` and `%`. If you do use them, step 3 shows how to encode them.
+   - **Port:** `5432` (default). If the installer suggests 5433, another PostgreSQL is already installed;
+     remember that port for step 3.
+   - **Locale:** default.
+3. Click **Finish**. Untick "Launch Stack Builder" if it asks.
+4. PostgreSQL now runs automatically as a Windows service (`postgresql-x64-17`), including after restarts.
+5. Open **pgAdmin 4** from the Start menu. The first time, it may ask you to set a pgAdmin master password;
+   that only protects pgAdmin's saved passwords, so choose anything. Click **Servers → PostgreSQL 17** and enter
+   the `postgres` password from step 2. If the server expands and shows **Databases**, the install is working.
+
+### 1. Clone the repo
+
+```powershell
+git clone https://github.com/HEsanthosh/BNP-MUM-Team-04.git
+cd BNP-MUM-Team-04
 ```
 
-**Supabase.** Use the *Session pooler* connection string (Project Settings → Database → Connect). The direct
-`db.<ref>.supabase.co` host is IPv6-only and often unreachable from home networks.
+### 2. Create the database in pgAdmin
 
-### 2. Backend
+1. Open pgAdmin 4 → **Servers → PostgreSQL 17** and enter the `postgres` user's password (the one set during installation).
+2. Right-click **Databases** → **Create → Database…**
+3. Set **Database** to `liquidplus` and **Owner** to `postgres`, then click **Save**.
 
-```bash
+Don't create any tables yourself; step 5 does that.
+
+### 3. Backend configuration
+
+```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate             # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-
-copy .env.example .env             # then set DATABASE_URL and JWT_SECRET_KEY
-copy seed_users.example.json seed_users.json   # then set a password for each user
-
-python scripts/init_db.py          # create tables + users
-python scripts/load_data.py        # load data/ : historical log, asset book, liability book
-uvicorn app.main:app --reload      # http://localhost:8000/docs
+.venv\Scripts\python -m pip install -r requirements.txt
+copy .env.example .env
+copy seed_users.example.json seed_users.json
 ```
 
-### 3. Frontend
+Edit **`backend\.env`**:
 
-```bash
+- `DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/liquidplus`
+  - If the password contains special characters, encode them: `#` → `%23`, `@` → `%40`, `:` → `%3A`,
+    `/` → `%2F`, `%` → `%25`. This prints the encoded form for you:
+    `python -c "import urllib.parse, getpass; print(urllib.parse.quote(getpass.getpass('Password: '), safe=''))"`
+  - If pgAdmin shows a port other than 5432 (Server → Properties → Connection), use that port.
+- `JWT_SECRET_KEY=`: paste the output of
+  `python -c "import secrets; print(secrets.token_urlsafe(48))"`
+
+Edit **`backend\seed_users.json`**: replace every `<at least 8 characters>` with a password. These are the
+logins for the web app (not the database).
+
+`.env` and `seed_users.json` are git-ignored. Never commit them.
+
+### 4. Check the database connection
+
+```powershell
+.venv\Scripts\python -c "from app.db import check_db_connection; print(check_db_connection())"
+```
+
+Expected: `(True, None)`. Anything else means `DATABASE_URL` is wrong (see Troubleshooting).
+
+### 5. Create tables and users, then load the sample data
+
+```powershell
+.venv\Scripts\python scripts\init_db.py
+.venv\Scripts\python scripts\load_data.py
+```
+
+Expected output from `load_data.py`:
+
+```
+historical_log - 10102026.xlsx: 16179/16186 accepted, 7 rejected ...
+asset_book - 10102026.xlsx: 753/755 accepted, 2 rejected ...
+    753 live asset transactions scored by the behavioral model
+liability_book - 10102026.xlsx: 1103/1104 accepted, 1 rejected ...
+    1103 live liability transactions scored by the behavioral model
+```
+
+The 10 rejected rows are intentionally invalid rows in the dataset.
+
+### 6. Start the backend (keep this terminal open)
+
+```powershell
+.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
+```
+
+Check http://localhost:8000/health/db; it should show `"database":"up"`. API docs are at http://localhost:8000/docs.
+
+### 7. Start the frontend (second terminal)
+
+```powershell
 cd frontend
 npm install
-npm run dev                        # http://localhost:5173 (proxies /api to localhost:8000)
+copy .env.example .env
+npm run dev
 ```
 
-Change the backend address with `VITE_PROXY_TARGET` in `frontend/.env`.
+Open **http://localhost:5173** and log in with a user from `backend\seed_users.json`:
 
-### Tests
+- `support_user`: all locations, plus uploads and model retraining (**Data and models** page)
+- `hk_user`, `ny_user`, `ldn_user`, `sg_user`, `paris_user`: only their own location
 
-```bash
+### Next time
+
+You only need step 6 and `npm run dev` from step 7. The data stays in the database.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `password authentication failed for user "postgres"` | Wrong password in `DATABASE_URL`, or special characters not encoded (step 3). |
+| `database "liquidplus" does not exist` | Create it in pgAdmin (step 2). |
+| `Connection refused` on port 5432 | PostgreSQL service isn't running: Windows Services → `postgresql-x64-NN` → Start. |
+| `Field required ... jwt_secret_key` or `database_url` | `backend\.env` is missing or still has the placeholders. |
+| `error while attempting to bind on address ... 8000` | Port 8000 is busy: start with `--port 8090` and set `VITE_PROXY_TARGET=http://127.0.0.1:8090` in `frontend\.env`. |
+| Frontend loads but every page shows an error | The backend isn't running, or `VITE_PROXY_TARGET` points to the wrong port. |
+| Login says "Invalid username or password" | Use the passwords from `seed_users.json`; if you changed them, re-run `scripts\init_db.py`. |
+| `Activate.ps1 cannot be loaded because running scripts is disabled` | You don't need to activate; call `.venv\Scripts\python` directly as shown above. |
+| `InconsistentVersionWarning` from scikit-learn | Install exactly from `requirements.txt` (scikit-learn 1.9.1). |
+| `python` opens the Microsoft Store | Install Python from python.org and tick "Add python.exe to PATH". |
+
+### Tests (optional)
+
+Create a second, empty database `liquidplus_test` in pgAdmin (the tests drop and recreate its tables), then:
+
+```powershell
 cd backend
-set TEST_DATABASE_URL=postgresql://postgres:<password>@localhost:5432/liquidplus_test   # an empty, throwaway database
-pytest                             # 48 tests
+$env:TEST_DATABASE_URL = "postgresql://postgres:YOUR_PASSWORD@localhost:5432/liquidplus_test"
+.venv\Scripts\python -m pytest -q          # 48 tests
 
-cd frontend
-npm test                           # 15 tests
+cd ..\frontend
+npm test -- --no-file-parallelism            # 15 tests
 ```
 
 ## API overview
