@@ -3,7 +3,7 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
-from app.constants import BatchStatus, Book, Bucket, GapType, LadderView, Role, ShiftDirection, ShiftUnit
+from app.constants import BatchStatus, Book, Bucket, GapType, LadderView, RecommendationRule, Role, ShiftDirection, ShiftUnit
 
 T = TypeVar("T")
 
@@ -213,14 +213,23 @@ class ScenarioResponse(BaseModel):
 
 class RecommendationOut(BaseModel):
     id: str
+    rule_code: RecommendationRule
+    category: str
     currency: str
     location: str
     bucket: Bucket
     gap_type: GapType
+    severity: str                  # high | medium | low (Rule A), surplus (B), monitor (C), medium (D)
     deterministic_gap: float
     ai_gap: float
-    severity: str
+    gap_difference: float          # ai_gap - deterministic_gap: the behavioural effect
+    amount: float                  # headline amount of the action
+    investable_surplus: float = 0  # Rule B / D: what can actually be invested
+    reserved_amount: float = 0     # Rule C / D: what should be kept back
+    required_buffer: float = 0
     action_text: str
+    detailed_action: str
+    reason: str
     rationale: str
 
 

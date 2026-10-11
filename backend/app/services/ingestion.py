@@ -86,6 +86,11 @@ def _save_historical(db: Session, records: list[dict], batch_id: int) -> None:
         db.execute(stmt)
 
 
+def upload_date(file_name: str, run_date: date | None = None) -> date:
+    """Date the uploaded positions belong to: explicit value, else DDMMYYYY in the file name, else today."""
+    return run_date or run_date_from_filename(file_name) or date.today()
+
+
 def refresh_predictions(db: Session, book: Book, run_date: date) -> str:
     """Step 4 of ingestion: score the new positions with the behavioral model.
 
@@ -93,8 +98,8 @@ def refresh_predictions(db: Session, book: Book, run_date: date) -> str:
     """
     try:
         if book == Book.HISTORICAL:
-            runs = behavior.predict_all_runs(db)
-            return f"Behavioral calibration refreshed for {runs} run date(s)"
+            summary = behavior.predict_latest(db)
+            return f"Behavioral calibration refreshed, {summary['predicted']} live transactions re-scored"
         count = behavior.predict_book(db, run_date, book)
         return f"{count} live {book.value} transactions scored by the behavioral model"
     except AppError as exc:
@@ -113,12 +118,7 @@ def ingest_file(
     if len(content) > settings.max_upload_size_bytes:
         raise FileValidationError(f"File exceeds the {settings.max_upload_size_mb} MB limit")
 
-    resolved_date = run_date or run_date_from_filename(file_name)
-    if resolved_date is None:
-        if book == Book.HISTORICAL:
-            resolved_date = date.today()
-        else:
-            raise FileValidationError("Run date not found. Add it to the file name (DDMMYYYY) or pass run_date")
+    resolved_date = upload_date(file_name, run_date)
 
     frame = read_table(content, file_name)
     outcome = validate_frame(frame, book)

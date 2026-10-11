@@ -35,8 +35,17 @@ class LadderView(StrEnum):
 
 
 class GapType(StrEnum):
-    SHORTFALL = "shortfall"
-    SURPLUS = "surplus"
+    SHORTFALL = "shortfall"    # Rule A
+    SURPLUS = "surplus"        # Rule B
+    RISK_ALERT = "risk_alert"  # Rule C
+    PRESERVE = "preserve"      # Rule D
+
+
+class RecommendationRule(StrEnum):
+    RAISE_FUNDING = "RULE_A"     # AI-adjusted shortfall
+    DEPLOY_SURPLUS = "RULE_B"    # AI-adjusted surplus, after a liquidity buffer
+    BEHAVIOURAL_RISK = "RULE_C"  # behaviour makes the gap materially worse than the contract says
+    PRESERVE = "RULE_D"          # surplus now, shortfall in a later bucket: keep the cash
 
 
 class ShiftUnit(StrEnum):

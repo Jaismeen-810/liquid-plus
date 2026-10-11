@@ -50,7 +50,7 @@ def compare(run_date: date = Depends(resolve_run_date), scope: Scope = Depends(g
 def ladder(view: str, run_date: date = Depends(resolve_run_date), scope: Scope = Depends(get_scope), db: Session = Depends(get_db)):
     v = _view(view)
     if v == LadderView.AI:
-        ensure_predictions(db, run_date)
+        ensure_predictions(db)
     return build_response(run_date, v, ladder_cells(db, run_date, v, scope))
 
 
@@ -70,7 +70,7 @@ def transactions(
 ):
     v = _view(view)
     if v == LadderView.AI:
-        ensure_predictions(db, run_date)
+        ensure_predictions(db)
     page_size = min(page_size, get_settings().drilldown_max_page_size)
     items, total = drilldown(db, run_date, v, bucket, scope, book=book, search=search, sort_by=sort_by,
                              sort_desc=sort_desc, page=page, page_size=page_size)

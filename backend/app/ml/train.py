@@ -95,5 +95,5 @@ def train_models(db: Session) -> list:
     for book in (Book.ASSET, Book.LIABILITY):
         train_book(hist, book)
     behavior.reset_model_cache()
-    behavior.predict_all_runs(db)
+    behavior.predict_latest(db)
     return behavior.model_info()

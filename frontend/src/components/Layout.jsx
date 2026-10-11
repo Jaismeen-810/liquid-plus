@@ -21,12 +21,9 @@ export default function Layout() {
       <header className="topbar">
         <span className="brand">Liquid<b>+</b></span>
         <div className="filters">
-          <label>
-            Run date
-            <select value={f.runDate} onChange={e => f.setRunDate(e.target.value)} disabled={!f.runDates.length}>
-              {!f.runDates.length && <option value="">No data</option>}
-              {f.runDates.map(d => <option key={d.run_date} value={d.run_date}>{d.run_date}</option>)}
-            </select>
+          <label title="Buckets are measured from this date, using the latest uploaded books">
+            As of date
+            <input type="date" value={f.runDate} required onChange={e => e.target.value && f.setRunDate(e.target.value)} />
           </label>
           <label>
             Location

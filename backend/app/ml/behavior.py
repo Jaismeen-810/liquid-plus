@@ -5,12 +5,14 @@ Uses the two logistic-regression pipelines from the ML project (`ml_models/{asse
 * p_early          = model probability for the live transaction
 * expected shift   = median days-before-maturity that similar historical contracts closed early
                      (by type + product + segment, falling back to segment, type, then all history)
-* adjusted maturity = contractual maturity - p_early x expected shift, never before the run date
+* adjusted maturity = contractual maturity - p_early x min(expected shift, days left), so never before the
+                      calculation date picked in the UI (the cap is applied in the ladder query for that date)
 """
 import json
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 
 import joblib
@@ -119,16 +121,23 @@ def shift_calibration(hist: pd.DataFrame) -> dict:
     }
 
 
-def expected_shift(cal: dict, side: str, product: str, segment: str, remaining_days: int) -> int:
+def expected_shift(cal: dict, side: str, product: str, segment: str, tenor_days: int) -> int:
+    """Typical days before maturity that similar contracts closed early (not yet capped at the days left)."""
     if not cal:
-        return remaining_days  # no history: assume an early exit could happen any time before maturity
+        return tenor_days  # no history: assume an early exit could happen any time before maturity
     days = (
         cal["detail"].get((side, product, segment))
         or cal["segment"].get((side, segment))
         or cal["type"].get(side)
         or cal["global"]
     )
-    return int(round(min(days, remaining_days)))
+    return int(round(days))
+
+
+def days_pulled(p_early, shift_days: int, contractual: date, calc_date: date) -> int:
+    """p_early x min(shift, days left), rounded half up like PostgreSQL's round() in the ladder query."""
+    days_left = max((contractual - calc_date).days, 0)
+    return int((Decimal(str(p_early)) * min(shift_days, days_left)).quantize(Decimal(1), ROUND_HALF_UP))
 
 
 # ---------------------------------------------------------------- explanations
@@ -206,7 +215,7 @@ def live_frame(db: Session, run_date: date, book: Book) -> pd.DataFrame:
         model.transaction_id, model.entity, model.location, model.currency, model.customer_segment, model.client_rating,
         model.transaction_date, model.maturity_date.label("contractual_maturity_date"), principal.label("amount"),
         model.interest_rate_pct, model.market_interest_rate_pct, product.label("product_type"),
-    ).where(model.run_date == run_date, model.maturity_date >= run_date)).mappings().all()
+    ).where(model.run_date == run_date)).mappings().all()
     df = pd.DataFrame(rows)
     if not df.empty:
         for col in ("amount", "interest_rate_pct", "market_interest_rate_pct"):
@@ -232,9 +241,9 @@ def predict_book(db: Session, run_date: date, book: Book, calibration: dict | No
 
     records = []
     for i, r in enumerate(raw.to_dict("records")):
-        remaining = (r["contractual_maturity_date"] - run_date).days
-        shift = expected_shift(cal, book.value, r["product_type"], r["customer_segment"], remaining)
-        pulled = int(round(p[i] * shift))
+        tenor = (r["contractual_maturity_date"] - r["transaction_date"]).days
+        shift = expected_shift(cal, book.value, r["product_type"], r["customer_segment"], tenor)
+        pulled = days_pulled(round(float(p[i]), 5), shift, r["contractual_maturity_date"], run_date)
         records.append({
             "run_date": run_date,
             "book": book,
@@ -256,61 +265,71 @@ def predict_book(db: Session, run_date: date, book: Book, calibration: dict | No
     return len(records)
 
 
-def predict_run(db: Session, run_date: date) -> dict:
+def latest_uploads(db: Session) -> dict[Book, date]:
+    """Run date of the most recent upload of each live book."""
+    out = {}
+    for book, (model, _, _) in LIVE_BOOKS.items():
+        latest = db.scalar(select(func.max(model.run_date)))
+        if latest:
+            out[book] = latest
+    return out
+
+
+def predict_latest(db: Session) -> dict:
+    """Score the latest uploaded asset and liability books (used after history changes and on 'Re-score')."""
+    uploads = latest_uploads(db)
+    if not uploads:
+        raise NotFoundError("No asset or liability book uploaded yet")
     cal = shift_calibration(historical_frame(db))
-    counts = {book: predict_book(db, run_date, book, cal) for book in LIVE_BOOKS}
-    if not any(counts.values()):
-        raise NotFoundError(f"No live transactions found for run date {run_date}")
-    avg = dict(db.execute(
-        select(Prediction.book, func.avg(Prediction.p_early)).where(Prediction.run_date == run_date).group_by(Prediction.book)
-    ).all())
+    counts = {book: predict_book(db, run_date, book, cal) for book, run_date in uploads.items()}
+    averages = {}
+    for book, run_date in uploads.items():
+        averages[book] = db.scalar(select(func.avg(Prediction.p_early)).where(Prediction.run_date == run_date, Prediction.book == book))
     return {
-        "run_date": run_date,
+        "run_date": max(uploads.values()),
         "predicted": sum(counts.values()),
-        "avg_p_early_assets": round(float(avg.get(Book.ASSET, 0) or 0), 4),
-        "avg_p_early_liabilities": round(float(avg.get(Book.LIABILITY, 0) or 0), 4),
+        "avg_p_early_assets": round(float(averages.get(Book.ASSET) or 0), 4),
+        "avg_p_early_liabilities": round(float(averages.get(Book.LIABILITY) or 0), 4),
     }
 
 
-def predict_all_runs(db: Session) -> int:
-    run_dates = set(db.scalars(select(AssetBook.run_date).distinct())) | set(db.scalars(select(LiabilityBook.run_date).distinct()))
-    for run_date in sorted(run_dates):
-        predict_run(db, run_date)
-    return len(run_dates)
-
-
-def ensure_predictions(db: Session, run_date: date) -> None:
+def ensure_predictions(db: Session) -> None:
     """Predictions are made at upload time; this re-creates them if they are missing (e.g. model added later)."""
-    for book, (model, _, _) in LIVE_BOOKS.items():
-        has_live = db.scalar(select(model.id).where(model.run_date == run_date, model.maturity_date >= run_date).limit(1))
+    for book, run_date in latest_uploads(db).items():
         has_pred = db.scalar(select(Prediction.id).where(Prediction.run_date == run_date, Prediction.book == book).limit(1))
-        if has_live and not has_pred:
+        if not has_pred:
             predict_book(db, run_date, book)
 
 
 # ---------------------------------------------------------------- rationale
 
-def _summary(row: Prediction, drivers: list[dict], pulled: int) -> str:
+def _summary(row: Prediction, drivers: list[dict], pulled: int, shift: int) -> str:
     event = "pre-close this loan" if row.book == Book.ASSET else "withdraw this deposit early"
     up = [d for d in drivers if d["contribution"] >= 0.005][:2]
     text = f"{float(row.p_early):.1%} probability the customer will {event} ({row.risk_level.lower()} risk)."
     if up:
         text += " Main factors pushing it up: " + ", ".join(f"{d['feature'].lower()} ({d['value']})" for d in up) + "."
     if pulled > 0:
-        text += (f" Similar contracts closed about {row.expected_shift_days} days before maturity, so the expected "
+        text += (f" Similar contracts closed about {shift} days before maturity, so the expected "
                  f"maturity moves {pulled} days earlier.")
     return text
 
 
-def rationale(db: Session, run_date: date, transaction_id: str, allowed_locations) -> PredictionRationale:
-    ensure_predictions(db, run_date)
-    row = db.scalar(select(Prediction).where(Prediction.run_date == run_date, Prediction.transaction_id == transaction_id))
+def rationale(db: Session, calc_date: date, transaction_id: str, allowed_locations) -> PredictionRationale:
+    """Why the model moved this deal, with the adjusted maturity worked out for the selected calculation date."""
+    ensure_predictions(db)
+    uploads = latest_uploads(db)
+    book = Book.ASSET if transaction_id.startswith("AST-") else Book.LIABILITY
+    row = db.scalar(select(Prediction).where(
+        Prediction.run_date == uploads.get(book), Prediction.book == book, Prediction.transaction_id == transaction_id
+    ))
     if row is None:
-        raise NotFoundError(f"No prediction for {transaction_id} on {run_date}")
+        raise NotFoundError(f"No prediction for {transaction_id}")
     if row.location not in allowed_locations:
         raise ForbiddenError("You do not have access to this location's data")
 
-    pulled = (row.contractual_maturity - row.adjusted_maturity).days
+    shift = min(row.expected_shift_days, max((row.contractual_maturity - calc_date).days, 0))
+    pulled = days_pulled(row.p_early, row.expected_shift_days, row.contractual_maturity, calc_date)
     drivers = row.drivers or []
     return PredictionRationale(
         transaction_id=row.transaction_id,
@@ -319,10 +338,10 @@ def rationale(db: Session, run_date: date, transaction_id: str, allowed_location
         predicted_early=row.predicted_early,
         risk_level=row.risk_level,
         threshold=load_model(row.book).threshold,
-        expected_shift_days=row.expected_shift_days,
+        expected_shift_days=shift,
         contractual_maturity=row.contractual_maturity,
-        adjusted_maturity=row.adjusted_maturity,
+        adjusted_maturity=row.contractual_maturity - timedelta(days=pulled),
         days_pulled_forward=pulled,
         drivers=[FeatureDriver(**d) for d in drivers],
-        summary=_summary(row, drivers, pulled),
+        summary=_summary(row, drivers, pulled, shift),
     )

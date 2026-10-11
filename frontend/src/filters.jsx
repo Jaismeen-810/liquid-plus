@@ -1,18 +1,19 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import { useFetch } from './api'
 
 const FiltersContext = createContext(null)
 
+// local calendar date as YYYY-MM-DD (toISOString would give the UTC date)
+export function today() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function FiltersProvider({ user, children }) {
-  const dates = useFetch('/api/ingest/run-dates')
-  const [runDate, setRunDate] = useState('')
+  const dates = useFetch('/api/ingest/run-dates') // uploads: only used to know whether any data exists
+  const [runDate, setRunDate] = useState(today)   // calculation date picked in the calendar
   const [location, setLocation] = useState(user.role === 'SUPPORT' ? '' : user.location)
   const [currency, setCurrency] = useState('USD')
-
-  useEffect(() => {
-    const list = dates.data || []
-    if (list.length && !list.some(d => d.run_date === runDate)) setRunDate(list[0].run_date)
-  }, [dates.data])
 
   const params = useMemo(() => ({ run_date: runDate, location: location || undefined }), [runDate, location])
 

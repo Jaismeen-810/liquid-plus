@@ -1,3 +1,6 @@
+from datetime import date, timedelta
+
+from app.services.ingestion import upload_date
 from tests.conftest import csv_bytes, liability_row
 
 
@@ -132,3 +135,39 @@ def test_exit_trend_period(client, support_headers, loaded):
     params = {"run_date": str(loaded), "months": 6}
     periods = {p["period"] for p in client.get("/api/analytics/exit-trends", params=params, headers=support_headers).json()["points"]}
     assert periods and min(periods) >= "2026-05"
+
+
+def _deal_counts(client, headers, run_date) -> dict:
+    body = client.get("/api/ladder/deterministic", params={"run_date": str(run_date)}, headers=headers).json()
+    counts = {}
+    for s in body["series"]:
+        for b in s["buckets"]:
+            counts[b["bucket"]] = counts.get(b["bucket"], 0) + b["asset_count"] + b["liability_count"]
+    return counts
+
+
+def test_any_calendar_date_rebuckets_latest_books(client, support_headers, loaded):
+    base = _deal_counts(client, support_headers, loaded)
+    later = _deal_counts(client, support_headers, loaded + timedelta(days=100))
+    assert later != base  # buckets are measured from the picked date
+    assert sum(later.values()) < sum(base.values())  # deals maturing before it drop out
+
+
+def test_deals_booked_after_the_date_are_excluded(client, support_headers, loaded):
+    body = client.get("/api/ladder/deterministic", params={"run_date": str(loaded - timedelta(days=60))}, headers=support_headers).json()
+    assert body["series"] == []
+
+
+def test_ai_maturity_never_before_picked_date_and_matches_rationale(client, support_headers, loaded):
+    calc = loaded + timedelta(days=100)
+    page = client.get("/api/ladder/ai/transactions", params={"run_date": str(calc), "bucket": "0-1M", "page_size": 500},
+                      headers=support_headers).json()
+    assert page["items"] and all(t["adjusted_maturity"] >= str(calc) for t in page["items"])
+    row = max(page["items"], key=lambda t: t["days_pulled_forward"])
+    rationale = client.get(f"/api/ml/predictions/{row['transaction_id']}", params={"run_date": str(calc)}, headers=support_headers).json()
+    assert rationale["adjusted_maturity"] == row["adjusted_maturity"]
+
+
+def test_upload_date_defaults_to_today_without_date_in_file_name():
+    assert upload_date("asset_book.xlsx") == date.today()
+    assert upload_date("asset_book - 10102026.xlsx") == date(2026, 10, 10)

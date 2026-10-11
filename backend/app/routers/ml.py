@@ -20,16 +20,17 @@ def models(_: CurrentUser = Depends(get_current_user)):
 
 @router.post("/train", response_model=list[ModelInfo])
 def retrain(user: CurrentUser = Depends(require_support), db: Session = Depends(get_db)):
-    """Retrain both models from the historical log, then re-score every run date."""
+    """Retrain both models from the historical log, then re-score the latest uploaded books."""
     result = train.train_models(db)
     audit.record(db, user, "model_train", models=[m.model_dump(mode="json") for m in result])
     return result
 
 
 @router.post("/predict", response_model=PredictResponse)
-def predict(run_date: date = Depends(resolve_run_date), user: CurrentUser = Depends(require_support), db: Session = Depends(get_db)):
-    summary = behavior.predict_run(db, run_date)
-    audit.record(db, user, "predict", run_date=run_date.isoformat(), predicted=summary["predicted"])
+def predict(user: CurrentUser = Depends(require_support), db: Session = Depends(get_db)):
+    """Re-score the latest uploaded asset and liability books."""
+    summary = behavior.predict_latest(db)
+    audit.record(db, user, "predict", positions_date=summary["run_date"].isoformat(), predicted=summary["predicted"])
     return summary
 
 

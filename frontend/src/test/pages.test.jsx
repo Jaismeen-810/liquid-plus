@@ -1,16 +1,18 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth'
 import App from '../App'
+import { today } from '../filters'
 import { fx, mockApi } from './mockApi'
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true }
 
 function open(path, user = fx.me) {
   sessionStorage.setItem('token', 'test-token')
-  mockApi({ '/api/auth/me': () => Promise.resolve(new Response(JSON.stringify(user), { headers: { 'Content-Type': 'application/json' } })) })
-  return render(<MemoryRouter initialEntries={[path]} future={FUTURE}><AuthProvider><App /></AuthProvider></MemoryRouter>)
+  const fetch = mockApi({ '/api/auth/me': () => Promise.resolve(new Response(JSON.stringify(user), { headers: { 'Content-Type': 'application/json' } })) })
+  render(<MemoryRouter initialEntries={[path]} future={FUTURE}><AuthProvider><App /></AuthProvider></MemoryRouter>)
+  return fetch
 }
 
 test('deterministic ladder shows buckets and drills into transactions', async () => {
@@ -66,3 +68,13 @@ function cleanupAndOpen(path) {
   document.body.innerHTML = ''
   open(path)
 }
+
+test('as-of calendar defaults to today and drives the API date', async () => {
+  const fetch = open('/ladder')
+  const input = await screen.findByLabelText('As of date')
+  expect(input).toHaveValue(today())
+  fireEvent.change(input, { target: { value: '2026-12-31' } })
+  await screen.findByRole('row', { name: /^1-3M/ })
+  const urls = fetch.mock.calls.map(c => String(c[0]))
+  expect(urls.some(u => u.includes('/api/ladder/deterministic?') && u.includes('run_date=2026-12-31'))).toBe(true)
+})

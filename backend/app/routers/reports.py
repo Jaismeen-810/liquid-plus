@@ -79,7 +79,7 @@ def export_ladder(
 ):
     v = _ladder_view(view)
     if v == LadderView.AI:
-        ensure_predictions(db, run_date)
+        ensure_predictions(db)
     frame = export.ladder_frame(build_response(run_date, v, ladder_cells(db, run_date, v, scope)))
     title = f"{'AI-adjusted' if v == LadderView.AI else 'Deterministic'} gap ladder"
     content = export.to_pdf(title, run_date, {title: frame}) if format == "pdf" else export.to_xlsx({"Gap ladder": frame})
@@ -99,7 +99,7 @@ def export_transactions(
 ):
     v = _ladder_view(view)
     if v == LadderView.AI:
-        ensure_predictions(db, run_date)
+        ensure_predictions(db)
     rows, _ = drilldown(db, run_date, v, bucket, scope, book=book, page=1, page_size=get_settings().export_max_rows)
     audit.record(db, user, "export", report="transactions", view=view, bucket=bucket.value, rows=len(rows))
     return _file(export.to_xlsx({f"{bucket.value} transactions": export.transactions_frame(rows)}),

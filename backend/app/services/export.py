@@ -24,8 +24,9 @@ def ladder_frame(ladder: LadderResponse) -> pd.DataFrame:
 
 def recommendations_frame(recs) -> pd.DataFrame:
     return pd.DataFrame([
-        {"Severity": r.severity, "Currency": r.currency, "Location": r.location, "Bucket": r.bucket, "Gap type": r.gap_type,
-         "Deterministic gap": float(r.deterministic_gap), "AI gap": float(r.ai_gap), "Action": r.action_text, "Rationale": r.rationale}
+        {"Rule": r.rule_code, "Category": r.category, "Severity": r.severity, "Currency": r.currency, "Location": r.location,
+         "Bucket": r.bucket, "Amount": r.amount, "Deterministic gap": r.deterministic_gap, "AI gap": r.ai_gap,
+         "Action": r.action_text, "Reason": r.reason, "Rationale": r.rationale}
         for r in recs
     ])
 

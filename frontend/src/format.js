@@ -24,3 +24,22 @@ export function money(value) {
 export const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
 export const pct = value => (value === null || value === undefined ? '–' : `${(value * 100).toFixed(1)}%`)
 export const gapClass = value => (value < 0 ? 'neg' : value > 0 ? 'pos' : '')
+
+export const CURRENCY_SYMBOLS = {
+  EUR: '€',
+  USD: '$',
+  GBP: '£',
+  SGD: 'S$',
+  HKD: 'HK$',
+}
+
+export function formatCurrency(value, currency = 'EUR') {
+  if (value === null || value === undefined) return '–'
+  const sym = CURRENCY_SYMBOLS[currency] || (currency ? `${currency} ` : '')
+  const abs = Math.abs(value)
+  const sign = value < 0 ? '−' : ''
+  if (abs >= 1e9) return `${sign}${sym}${(abs / 1e9).toFixed(1)}B`
+  if (abs >= 1e6) return `${sign}${sym}${(abs / 1e6).toFixed(1)}M`
+  if (abs >= 1e3) return `${sign}${sym}${(abs / 1e3).toFixed(0)}K`
+  return `${sign}${sym}${abs.toFixed(0)}`
+}

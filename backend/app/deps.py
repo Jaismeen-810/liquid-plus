@@ -60,11 +60,11 @@ def get_scope(
 
 
 def resolve_run_date(
-    run_date: date | None = Query(None, description="Defaults to the latest uploaded run date"),
+    run_date: date | None = Query(None, description="Calculation date the buckets are measured from (default: today)"),
     _: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> date:
-    resolved = run_date or latest_run_date(db)
-    if resolved is None:
+    """Any calendar date. Ladders always use the latest uploaded books, bucketed from this date."""
+    if latest_run_date(db) is None:
         raise NotFoundError("No data uploaded yet")
-    return resolved
+    return run_date or date.today()

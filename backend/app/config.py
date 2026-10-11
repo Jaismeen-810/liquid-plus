@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     day_count_basis: int = 365
     materiality_threshold_pct: float = 10.0
+    liquidity_buffer_pct: float = 4.0  # share of a surplus kept back before investing (Rule B)
     anomaly_multiplier: float = 2.0
     anomaly_window_days: int = 90
     drilldown_max_page_size: int = 500

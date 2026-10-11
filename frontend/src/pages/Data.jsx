@@ -39,7 +39,7 @@ function Upload({ book, label, note, onDone }) {
       {state.error && <p className="error">{state.error.message}</p>}
       {r && (
         <div className="result">
-          <p className={r.batch.rows_rejected ? 'warn' : 'ok'}>{r.message} (run date {r.batch.run_date})</p>
+          <p className={r.batch.rows_rejected ? 'warn' : 'ok'}>{r.message} (uploaded as of {r.batch.run_date})</p>
           {r.predictions && <p className="muted small">{r.predictions}</p>}
           {r.errors_preview.length > 0 && (
             <table className="grid compact">
@@ -60,7 +60,7 @@ function Upload({ book, label, note, onDone }) {
 const metric = v => (v === undefined || v === null ? '–' : v.toFixed(3))
 
 export default function Data() {
-  const { reloadDates, runDate } = useFilters()
+  const { reloadDates } = useFilters()
   const batches = useFetch('/api/ingest/batches', { limit: 10 })
   const models = useFetch('/api/ml/models')
   const [job, setJob] = useState({})
@@ -71,7 +71,7 @@ export default function Data() {
     setJob({ busy: name })
     try {
       const result = await call()
-      setJob({ done: name === 'train' ? 'Models retrained and all run dates re-scored.' : `${result.predicted} transactions re-scored for ${result.run_date}.` })
+      setJob({ done: name === 'train' ? 'Models retrained and the latest books re-scored.' : `${result.predicted} transactions re-scored.` })
       models.reload()
       reloadDates()
     } catch (error) {
@@ -81,7 +81,7 @@ export default function Data() {
 
   return (
     <>
-      <PageHead title="Data and models" note="Each upload is validated row by row, stored, and the live books are scored by the behavioral model straight away. The run date is read from the file name (DDMMYYYY)." />
+      <PageHead title="Data and models" note="Each upload is validated row by row, stored, and the live books are scored by the behavioral model straight away. The ladders always use the latest asset and liability books; pick the date to calculate from in the top bar." />
 
       <section>
         <h2>Upload files</h2>
@@ -92,8 +92,8 @@ export default function Data() {
         <div className="sectionhead">
           <h2>Behavioral models</h2>
           <div className="inline">
-            <button onClick={() => run('predict', () => api.post('/api/ml/predict', undefined, { run_date: runDate }))} disabled={!!job.busy || !runDate}>
-              {job.busy === 'predict' ? 'Scoring…' : 'Re-score run date'}
+            <button onClick={() => run('predict', () => api.post('/api/ml/predict'))} disabled={!!job.busy}>
+              {job.busy === 'predict' ? 'Scoring…' : 'Re-score latest books'}
             </button>
             <button className="primary" onClick={() => run('train', () => api.post('/api/ml/train'))} disabled={!!job.busy}>
               {job.busy === 'train' ? 'Training…' : 'Retrain from history'}
@@ -130,7 +130,7 @@ export default function Data() {
         <Status loading={batches.loading && !batches.data} error={batches.error} />
         {batches.data?.length > 0 && (
           <table className="grid">
-            <thead><tr><th>File</th><th>Book</th><th>Run date</th><th className="r">Accepted</th><th className="r">Rejected</th><th>Status</th></tr></thead>
+            <thead><tr><th>File</th><th>Book</th><th>Uploaded as of</th><th className="r">Accepted</th><th className="r">Rejected</th><th>Status</th></tr></thead>
             <tbody>
               {batches.data.map(b => (
                 <tr key={b.id}>

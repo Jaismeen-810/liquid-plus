@@ -30,7 +30,7 @@ backend/
       behavior.py      load models, predict, adjusted maturity, per-transaction explanation
       train.py         retrain both models from the historical log
   ml_models/           asset_model.joblib, liability_model.joblib + thresholds (from the ML project)
-  data/                sample input files (run date 10-10-2026)
+  data/                sample input files (positions as of 10-10-2026)
   scripts/             init_db.py, load_data.py, train_model.py, seed_users.py
   tests/               pytest: validation, cashflow, auth, API end-to-end
 frontend/
@@ -45,7 +45,7 @@ Two roles:
 | Role      | Sees | Can |
 |-----------|------|-----|
 | `BRANCH`  | only their assigned location (Hong Kong, New York, London, Singapore or Paris); the location filter is locked | view ladders, drill-down, what-if, recommendations, analytics, export |
-| `SUPPORT` | all locations, or any single one | everything above, plus upload files, retrain the model, re-score a run date |
+| `SUPPORT` | all locations, or any single one | everything above, plus upload files, retrain the model, re-score the latest books |
 
 Location scoping is enforced on the server for every endpoint (`app/deps.py`). A branch user asking for another
 location gets `403` and an `access_denied` audit entry. Users are defined in `backend/seed_users.json`
@@ -61,8 +61,9 @@ location gets `403` and an `access_denied` audit entry. Users are defined in `ba
 
 1. **Historical log** (`historical_log*.xlsx`): upserted by `Transaction_ID`. Used to calibrate how many days
    before maturity customers typically exit, and to retrain the models.
-2. **Asset book** and **liability book** (`asset_book - DDMMYYYY.xlsx`, `liability_book - DDMMYYYY.xlsx`): the run
-   date comes from the file name. Uploading a book replaces that book for that run date (daily refresh). Interest
+2. **Asset book** and **liability book** (e.g. `asset_book.xlsx`, `liability_book.xlsx`): the ladders always use the
+   **latest uploaded** copy of each book (daily refresh). The upload is dated by a `DDMMYYYY` in the file name if
+   present, otherwise today; that date is only kept for the upload history. Interest
    (simple, actual/365, paid at maturity) and maturity cash flow are computed on load. Every live transaction is
    then scored and its adjusted maturity stored in `predictions`.
 
@@ -78,13 +79,14 @@ tuned thresholds (asset 0.43, liability 0.62).
 - `p_early`: model probability that the loan is pre-closed or the deposit withdrawn early.
 - `expected shift`: median number of days before maturity that similar historical contracts closed early
   (by type + product + segment, falling back to segment, type, then all history).
-- **Adjusted maturity** = contractual maturity − `p_early` × expected shift, never before the run date.
+- **Adjusted maturity** = contractual maturity − `p_early` × min(expected shift, days left), so never before the
+  selected *as of* date.
 - **Rationale**: for each transaction, how much each factor (tenor, market rate, interest-rate difference,
   amount, client rating, product/segment, location/currency, booking timing) moves the probability compared
   with an average transaction.
 - **Retrain**: `POST /api/ml/train` or `python scripts/train_model.py` refits both models on the current
   historical log (same search and threshold tuning as the ML project), overwrites `ml_models/`, and re-scores
-  every run date.
+  the latest uploaded books.
 
 ## Setup (run it locally)
 
@@ -259,16 +261,17 @@ npm test -- --no-file-parallelism            # 15 tests
 | GET  | `/api/recommendations`, `/api/analytics/{exit-trends,anomalies}` | logged in |
 | GET  | `/api/export/{ladder,transactions,recommendations}` | logged in |
 
-All data endpoints accept `run_date` (default: latest), `location` and `currency`, and are scoped to the
+All data endpoints accept `run_date` (the *as of* date picked in the top-bar calendar; default: today), `location` and `currency`, and are scoped to the
 user's allowed locations.
 
 ## Assumptions
 
-- Buckets are measured from the run date in calendar months: 0–1M, 1–3M, 3–12M, 1–5Y, >5Y. A maturity on a
-  boundary falls in the earlier bucket. Deals that matured before the run date are excluded.
+- The top-bar **As of date** is a calendar: any date can be picked. Buckets are measured from it in calendar months:
+  0–1M, 1–3M, 3–12M, 1–5Y, >5Y. A maturity on a boundary falls in the earlier bucket. Only deals live on that date
+  are counted: booked on or before it and maturing on or after it.
 - Gaps are per currency; amounts are never converted between currencies.
 - In the AI and what-if views, interest is recomputed to the adjusted or shifted maturity date.
-- What-if shifts move contractual maturities (never before the run date) and do not use the model.
+- What-if shifts move contractual maturities (never before the as of date) and do not use the model.
 - Recommendations are generated for buckets where |AI-adjusted gap| ≥ `MATERIALITY_THRESHOLD_PCT` (10%) of
   the larger side, and are recomputed on request (no stale cache).
 - Anomalies: a day's deposit outflow ≥ `ANOMALY_MULTIPLIER` × the previous `ANOMALY_WINDOW_DAYS`-day average.

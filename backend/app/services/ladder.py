@@ -39,20 +39,33 @@ def _shifted(col, shift: TenorShift, run_date: date):
     return func.greatest(moved, run_date)
 
 
+def latest_upload(model):
+    """Positions always come from the most recently uploaded copy of each book."""
+    return select(func.max(model.run_date)).scalar_subquery()
+
+
 def flows_subquery(
     run_date: date,
     view: LadderView,
     asset_shift: TenorShift | None = None,
     liability_shift: TenorShift | None = None,
 ):
+    """One row per deal that is live on `run_date` (the calculation date picked in the calendar), with its bucket.
+
+    Deals are taken from the latest uploaded books; deals booked after the date or matured before it are left out.
+    AI view: maturity moves earlier by p_early x min(typical days early, days left), so never before the date.
+    """
     basis = get_settings().day_count_basis
+    calc_date = literal(run_date, Date)
     parts = []
     for book, model, principal, product in BOOKS:
         p_early = cast(null(), Numeric(6, 5))
         risk = cast(null(), String(8))
         maturity = model.maturity_date
         if view == LadderView.AI:
-            maturity = Prediction.adjusted_maturity
+            days_left = type_coerce(model.maturity_date - calc_date, Integer)
+            pulled = cast(func.round(Prediction.p_early * func.least(Prediction.expected_shift_days, days_left)), Integer)
+            maturity = type_coerce(model.maturity_date - pulled, Date)
             p_early, risk = Prediction.p_early, Prediction.risk_level
         elif view == LadderView.SCENARIO:
             shift = asset_shift if book == Book.ASSET else liability_shift
@@ -86,7 +99,7 @@ def flows_subquery(
             cast(maturity, Date).label("effective_maturity"),
             p_early.label("p_early"),
             risk.label("risk_level"),
-        ).where(model.run_date == run_date, model.maturity_date >= run_date)
+        ).where(model.run_date == latest_upload(model), model.transaction_date <= run_date, model.maturity_date >= run_date)
 
         if view == LadderView.AI:
             stmt = stmt.join(
